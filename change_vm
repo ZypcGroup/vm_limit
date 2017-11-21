@@ -1,0 +1,117 @@
+#!/usr/bin/perl -w
+##
+## Copyright (c) 2017 Zypc, Inc.  All rights reserved.
+#
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin/../";
+
+use VMware::VIRuntime;
+
+
+$Util::script_version = "1.0";
+
+my $argc = scalar(@ARGV);
+if ($argc != 4){
+	print "goodbye\n";
+	exit(0);
+}
+# define para;
+
+my $vCip ="192.168.220.50";
+my $vCurl='https://'.$vCip.'/sdk';
+my $vCuser='Administrator@vsphere.local';
+my $vCpass="";
+my $vmname= $ARGV[0];
+my $limit_cpu = $ARGV[1];
+my $limit_memory = $ARGV[2];
+my $limit_iops = $ARGV[3];
+#my $limit_speed = 40;
+
+Util::connect($vCurl,$vCuser,$vCpass);
+
+my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine',
+	                            filter => {"config.name" => $vmname});
+
+
+foreach(@$vm_views){
+	my $mor_host = $_->runtime->host;
+	my $hostname = Vim::get_view(mo_ref => $mor_host)->name;
+	my $vm_view = $_;
+	
+	#set cpu&mem limit
+
+	my $resourceAllocationCpu = ResourceAllocationInfo->new(limit=>$limit_cpu);
+	my $resourceAllocationMemory = ResourceAllocationInfo->new(limit=>$limit_memory);
+
+	#set network&storage limit
+	my $hd;
+	my $nic;
+	my $devices = $vm_view->config->hardware->device;
+	        foreach(@$devices){
+			my $deviceName = $_->deviceInfo->label;
+			if($deviceName eq 'Hard disk 1'){
+				$hd = $_;
+			}
+			if($deviceName eq 'Network adapter 1'){
+				$nic = $_; 
+			}
+		}
+	
+	my $storageIOAllocationInfo =
+	   StorageIOAllocationInfo->new (limit=>$limit_iops);
+	   $hd->storageIOAllocation($storageIOAllocationInfo);
+
+	   #my $virtualEthernetCardResourceAllocation =
+	   #VirtualEthernetCardResourceAllocation->new (limit=>$limit_speed);
+	   #$nic->resourceAllocation($virtualEthernetCardResourceAllocation);
+
+	my $virtualDeviceConfigSpec_hd =
+			VirtualDeviceConfigSpec->new (device => $hd,
+			operation => VirtualDeviceConfigSpecOperation->new('edit'));
+	
+		#my $virtualDeviceConfigSpec_nic =
+		#	VirtualDeviceConfigSpec->new (device => $nic,
+		#	operation => VirtualDeviceConfigSpecOperation->new('edit'));
+
+	my $vmConfig =
+	            VirtualMachineConfigSpec->new (cpuAllocation => $resourceAllocationCpu,
+		    			memoryAllocation => $resourceAllocationMemory,
+					deviceChange => [$virtualDeviceConfigSpec_hd]
+					);
+	
+	$_->ReconfigVM (spec => $vmConfig);
+	$_->update_view_data();
+
+
+	
+	Util::trace(0, $vm_view->name . " cpu_limit ". $vm_view->config->cpuAllocation->limit . "\n");
+	Util::trace(0, $vm_view->name . " mem_limit ". $vm_view->config->memoryAllocation->limit . "\n");
+	Util::trace(0, $vm_view->name . " " . $hd->storageIOAllocation->limit . "\n");
+	#Util::trace(0,$vm_view->name . " " . $nic->resourceAllocation->limit . "\n");
+}
+	
+$SIG{INT} = sub { Util::disconnect();
+exit;
+};
+
+Util::disconnect();
+
+=head1 NAME
+
+change_vm - modify limit
+
+=head1 SYNOPSIS
+
+ change_vm <name of virtual machine> <cpu_limit> <memory_limit> <disk_iops>
+
+=head1 DESCRIPTION
+
+This VI Perl command-line utility provides an interface for modifying
+limit for CPU, memory, and disk iops for specified virtual machine.
+
+=head1 OPTIONS
+
+=over

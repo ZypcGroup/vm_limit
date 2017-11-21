@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+##
+## Copyright (c) 2017 Zypc, Inc.  All rights reserved.
+#
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::Bin/../";
+
+use VMware::VIRuntime;
+
+
+$Util::script_version = "1.0";
+
+my $argc = scalar(@ARGV);
+if ($argc != 2){
+	print "goodbye\n";
+	exit(0);
+}
+# define para;
+
+my $vCip ="192.168.220.50";
+my $vCurl='https://'.$vCip.'/sdk';
+my $vCuser='Administrator@vsphere.local';
+my $vCpass="";
+my $vmname= $ARGV[0];
+my $limit_speed = $ARGV[1];
+
+Util::connect($vCurl,$vCuser,$vCpass);
+
+my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine',
+	                            filter => {"config.name" => $vmname});
+
+
+foreach(@$vm_views){
+	my $mor_host = $_->runtime->host;
+	my $hostname = Vim::get_view(mo_ref => $mor_host)->name;
+	my $vm_view = $_;
+	
+	my $nic;
+	my $devices = $vm_view->config->hardware->device;
+	        foreach(@$devices){
+			my $deviceName = $_->deviceInfo->label;
+			if($deviceName eq 'Network adapter 1'){
+				$nic = $_;
+			}
+		}
+	my $sharesInfo =
+	                SharesInfo->new (shares=>0,level=>$nic->resourceAllocation->share->level);
+	my $virtualEthernetCardResourceAllocation =
+	   	VirtualEthernetCardResourceAllocation->new (limit=>$limit_speed,share=>($sharesInfo));
+	   $nic->resourceAllocation($virtualEthernetCardResourceAllocation);
+
+	my $virtualDeviceConfigSpec_nic =
+		VirtualDeviceConfigSpec->new (device => $nic,
+		operation => VirtualDeviceConfigSpecOperation->new('edit'));
+
+	my $vmConfig =
+	            VirtualMachineConfigSpec->new (
+			    deviceChange => [$virtualDeviceConfigSpec_nic]);
+	
+	$_->ReconfigVM (spec => $vmConfig);
+	$_->update_view_data();
+
+
+	
+	Util::trace(0,$vm_view->name . " " . $nic->resourceAllocation->limit . "\n");
+}
+	
+$SIG{INT} = sub { Util::disconnect();
+exit;
+};
+
+Util::disconnect();
+
+=head1 NAME
+
+change_vm - modify limit
+
+=head1 SYNOPSIS
+
+ change_vm <name of virtual machine> <network_speed>
+
+=head1 DESCRIPTION
+
+This VI Perl command-line utility provides an interface for modifying
+limit of network for specified virtual machine.
+
+=head1 OPTIONS
+
+=over
